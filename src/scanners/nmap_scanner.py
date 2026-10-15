@@ -109,9 +109,38 @@ class NmapScanner(BaseScanner):
     def name(self) -> str:
         return "Nmap Vulners Scanner"
 
+    @classmethod
+    def _find_nmap_binary(cls) -> str | None:
+        """Locate the Nmap executable via PATH or standard installation directories."""
+        # 1. Standard PATH check
+        path = shutil.which("nmap")
+        if path:
+            return path
+
+        # 2. Common Windows paths
+        win_candidates = [
+            r"C:\Program Files (x86)\Nmap\nmap.exe",
+            r"C:\Program Files\Nmap\nmap.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Programs\Nmap\nmap.exe"),
+        ]
+        # 3. Common Unix/macOS paths
+        unix_candidates = [
+            "/usr/bin/nmap",
+            "/usr/local/bin/nmap",
+            "/opt/homebrew/bin/nmap",
+        ]
+        for candidate in win_candidates + unix_candidates:
+            if os.path.isfile(candidate):
+                candidate_dir = os.path.dirname(candidate)
+                if candidate_dir not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = f"{candidate_dir}{os.pathsep}{os.environ.get('PATH', '')}"
+                return candidate
+
+        return None
+
     def is_available(self) -> tuple[bool, str]:
-        """Verify Nmap binary is present on PATH."""
-        nmap_path = shutil.which("nmap")
+        """Verify Nmap binary is present on PATH or standard install paths."""
+        nmap_path = self._find_nmap_binary()
         if not nmap_path:
             return (
                 False,
@@ -142,8 +171,9 @@ class NmapScanner(BaseScanner):
         if not is_valid:
             raise ValueError(f"Target validation failed: {err_msg}")
 
-        available, msg = self.is_available()
-        if not available:
+        nmap_bin = self._find_nmap_binary()
+        if not nmap_bin:
+            available, msg = self.is_available()
             raise RuntimeError(msg)
 
         # Temporary output file
@@ -152,7 +182,7 @@ class NmapScanner(BaseScanner):
 
         try:
             # 1. Primary command: -sV --script vulners
-            cmd = ["nmap", "-sV", "--script", "vulners", "-oX", temp_path, target]
+            cmd = [nmap_bin, "-sV", "--script", "vulners", "-oX", temp_path, target]
             logger.info("Running Nmap vulners scan: %s", " ".join(cmd))
 
             proc = subprocess.run(
@@ -178,7 +208,7 @@ class NmapScanner(BaseScanner):
                 logger.warning(
                     "Nmap vulners script unavailable or errored; falling back to plain -sV scan."
                 )
-                cmd_fallback = ["nmap", "-sV", "-oX", temp_path, target]
+                cmd_fallback = [nmap_bin, "-sV", "-oX", temp_path, target]
                 proc_fallback = subprocess.run(
                     cmd_fallback,
                     capture_output=True,
