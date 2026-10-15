@@ -1,0 +1,6 @@
+asset,asset_type,asset_criticality,vulnerability,cve,cvss,service,port,owner,status
+WIN-DC01,Server-Windows,High,Active Directory Privilege Escalation,CVE-2022-26923,8.8,active-directory,389,Identity Team,Open
+LNX-APP01,Server-Linux,High,OpenSSL Remote Buffer Overflow,CVE-2022-3602,7.5,openssl/3.0.6,443,SecOps,In Progress
+NET-CORE01,Network,High,Cisco IOS XE Web UI Command Injection,CVE-2023-20198,10.0,cisco-iosxe,443,NetOps,Open
+WKS-FINANCE03,Workstation,Low,Adobe Acrobat PDF Out-of-bounds Read,CVE-2023-26369,7.8,acrobat,0,IT Support,Mitigated
+LNX-DB02,Server-Linux,High,PostgreSQL Privilege Escalation,CVE-2023-2454,7.2,postgresql/14.2,5432,DBA Team,Accepted

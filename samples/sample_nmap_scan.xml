@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -sV -oX scan.xml 192.168.1.10 192.168.1.25" start="1704067200" version="7.94">
+  <host>
+    <status state="up" reason="arp-response"/>
+    <address addr="192.168.1.10" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="corp-dc01.internal" type="PTR"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="88">
+        <state state="open" reason="syn-ack"/>
+        <service name="kerberos-sec" product="Microsoft Windows Kerberos" ostype="Windows"/>
+      </port>
+      <port protocol="tcp" portid="445">
+        <state state="open" reason="syn-ack"/>
+        <service name="microsoft-ds" product="Windows Server 2019 Standard 17763 microsoft-ds" ostype="Windows"/>
+      </port>
+      <port protocol="tcp" portid="3389">
+        <state state="open" reason="syn-ack"/>
+        <service name="ms-wbt-server" product="Microsoft Terminal Services" ostype="Windows"/>
+      </port>
+    </ports>
+  </host>
+  <host>
+    <status state="up" reason="syn-ack"/>
+    <address addr="192.168.1.25" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="dmz-web01.internal" type="PTR"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="22">
+        <state state="open" reason="syn-ack"/>
+        <service name="ssh" product="OpenSSH" version="8.2p1 Ubuntu 4ubuntu0.5" extrainfo="Ubuntu Linux; protocol 2.0" ostype="Linux"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack"/>
+        <service name="http" product="Apache httpd" version="2.4.41" extrainfo="(Ubuntu)" ostype="Linux"/>
+      </port>
+      <port protocol="tcp" portid="443">
+        <state state="open" reason="syn-ack"/>
+        <service name="ssl/http" product="Apache httpd" version="2.4.41" extrainfo="(Ubuntu)" tunnel="ssl" ostype="Linux"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>
