@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<nmaprun scanner="nmap" args="nmap -sV --script vulners -oX scan_vulners.xml 192.168.1.100" start="1704067200" version="7.94">
+  <host>
+    <status state="up" reason="syn-ack"/>
+    <address addr="192.168.1.100" addrtype="ipv4"/>
+    <hostnames>
+      <hostname name="secops-target.internal" type="PTR"/>
+    </hostnames>
+    <ports>
+      <port protocol="tcp" portid="21">
+        <state state="open" reason="syn-ack"/>
+        <service name="ftp" product="vsftpd" version="3.0.3" ostype="Unix"/>
+      </port>
+      <port protocol="tcp" portid="23">
+        <state state="open" reason="syn-ack"/>
+        <service name="telnet" product="Linux telnetd" ostype="Unix"/>
+      </port>
+      <port protocol="tcp" portid="80">
+        <state state="open" reason="syn-ack"/>
+        <service name="http" product="Apache httpd" version="2.4.49" ostype="Linux"/>
+        <script id="vulners" output="&#xa;  cpe:/a:apache:http_server:2.4.49:&#xa;    CVE-2021-41773&#x9;7.5&#x9;https://vulners.com/cve/CVE-2021-41773&#xa;    CVE-2021-42013&#x9;7.5&#x9;https://vulners.com/cve/CVE-2021-42013">
+          <table>
+            <table key="cpe:/a:apache:http_server:2.4.49">
+              <table>
+                <elem key="id">CVE-2021-41773</elem>
+                <elem key="type">cve</elem>
+                <elem key="cvss">7.5</elem>
+                <elem key="is_exploit">true</elem>
+              </table>
+              <table>
+                <elem key="id">CVE-2021-42013</elem>
+                <elem key="type">cve</elem>
+                <elem key="cvss">7.5</elem>
+                <elem key="is_exploit">true</elem>
+              </table>
+            </table>
+          </table>
+        </script>
+      </port>
+      <port protocol="tcp" portid="445">
+        <state state="open" reason="syn-ack"/>
+        <service name="microsoft-ds" product="Samba smbd" version="4.9.5" ostype="Unix"/>
+      </port>
+    </ports>
+  </host>
+</nmaprun>

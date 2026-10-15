@@ -14,17 +14,18 @@ VulnTrack ingests vulnerability scan data (demo, Nmap XML, or CSV), applies a do
 
 | Feature | Details |
 |---------|---------|
-| **3 ingestion modes** | Demo (150 realistic CVEs), Nmap -sV XML, generic CSV |
+| **Live Network Scanning** | Nmap + Vulners NSE execution, private IP validation, re-scan diffing & auto-mitigation |
+| **Data Ingestion** | Demo (150 realistic CVEs), Nmap -sV XML, generic CSV |
 | **Risk scoring** | CVSS → severity → risk score 0-100 (asset-criticality adjusted) |
-| **Risk Register** | SQLite-backed, filterable, sortable, inline-editable |
+| **Risk Register** | SQLite-backed, filterable, sortable, inline-editable, scope filter |
 | **Executive Dashboard** | KPIs, severity donut, top-10 risky assets, 6-month trend |
 | **Remediation Tracker** | Overdue / due-this-week lists grouped by owner |
 | **Compliance View** | NIST CSF function heatmap + ISO 27001 Annex A coverage gauge |
 | **Export** | Styled Excel workbook + Markdown management summary |
 | **PowerShell Collector** | Windows host assessment → CSV for import |
 | **Docker** | One-command container build and run |
-| **Tests** | 60 unit tests across scoring, parsers, database, demo data, and reports |
-| **Sample Data** | Ready-to-use sample Nmap XML and CSV scan files in `samples/` |
+| **Tests** | 69 unit tests across scoring, parsers, database, demo data, scanner, and reports |
+| **Sample Data** | Ready-to-use sample Nmap XML, Vulners XML, and CSV files in `samples/` |
 
 ---
 
@@ -77,6 +78,10 @@ graph TD
 ### Prerequisites
 - Python 3.11+
 - pip
+- Nmap 7.9+ *(optional, required for live scanning)*:
+  - **Windows**: `winget install Insecure.Nmap`
+  - **Linux (Ubuntu/Debian)**: `sudo apt install nmap`
+  - **macOS**: `brew install nmap`
 
 ### Install & Run
 ```bash
@@ -88,6 +93,12 @@ streamlit run app.py
 ```
 
 Open [http://localhost:8501](http://localhost:8501). Demo data loads automatically.
+
+### Running Live Scans
+1. In the sidebar, select **🎯 Live Network Scan**.
+2. Enter a private IPv4 target (e.g. `127.0.0.1` or `192.168.1.100`).
+3. Set the asset criticality and owner, then click **🚀 Launch Live Nmap Scan**.
+4. VulnTrack executes `nmap -sV --script vulners`, correlates CVEs and risky services, and performs automatic re-scan reconciliation (closed ports are auto-mitigated, new findings added, unchanged findings preserve history).
 
 ### Run Tests
 ```bash
@@ -184,15 +195,24 @@ vulntrack/
 ├── Dockerfile
 ├── .streamlit/
 │   └── config.toml               # Theme + server config
+├── src/
+│   ├── __init__.py
+│   └── scanners/
+│       ├── __init__.py
+│       ├── base.py               # Extensible BaseScanner interface + Finding dataclass
+│       ├── validator.py          # Private IP validator & legal safety checks
+│       ├── nmap_scanner.py       # Live Nmap + Vulners NSE scanner implementation
+│       └── rescan.py             # Re-scan deduplication & auto-mitigation diff engine
 ├── core/
 │   ├── __init__.py
 │   ├── scoring.py                # CVSS → risk score, SLA, overdue
-│   ├── database.py               # SQLite schema + CRUD
+│   ├── database.py               # SQLite schema + CRUD + scan logs
 │   ├── demo_data.py              # 150-finding demo generator
 │   ├── parsers.py                # Nmap XML + CSV parsers
 │   └── exports.py                # Excel + Markdown reports
 ├── samples/
 │   ├── sample_nmap_scan.xml      # Realistic Nmap scan file for upload testing
+│   ├── sample_nmap_vulners.xml   # Sample Nmap XML with Vulners script output
 │   └── sample_generic_findings.csv # Realistic CSV export for upload testing
 ├── tests/
 │   ├── __init__.py
@@ -200,7 +220,8 @@ vulntrack/
 │   ├── test_parsers.py           # Nmap and CSV parser unit tests
 │   ├── test_database.py          # SQLite persistence and CRUD unit tests
 │   ├── test_demo_data.py         # Demo data generation unit tests
-│   └── test_exports.py           # Excel and Markdown report unit tests
+│   ├── test_exports.py           # Excel and Markdown report unit tests
+│   └── test_scanner.py           # Live scanner, IP validator, and re-scan diff tests
 ├── scripts/
 │   └── collect_windows_info.ps1  # Windows host assessment
 ├── docs/
@@ -214,8 +235,8 @@ vulntrack/
 
 ## Limitations
 
+- **Unauthenticated scans produce false positives** — Network port scanning and service banner enumeration detect exposed version strings but cannot inspect backported vendor patches, local configuration files, or kernel hardening. Credentialed/authenticated scans are required for definitive vulnerability verification.
 - **SQLite is ephemeral on cloud platforms** — data resets between Streamlit Community Cloud restarts.
-- **Nmap CVSS is estimated** — Nmap doesn't output CVSS scores; port/service heuristics are used.
 - **No authentication** — this is a portfolio/demo tool; add an auth layer (e.g. `streamlit-authenticator`) before using in production.
 - **Demo CVE data** — dates and statuses are randomised for demonstration; not reflective of any real production environment.
 - **PDF export** — the Markdown export requires external tooling (e.g. Pandoc) for PDF conversion.
@@ -224,6 +245,7 @@ vulntrack/
 
 ## Future Work
 
+- [ ] **Authenticated SSH Scanning with OSV.dev Package Matching** — Credentialed agentless audit using SSH to enumerate installed system packages (`dpkg`, `rpm`, `pacman`) and correlate against the OSV.dev vulnerability database to eliminate unauthenticated banner false positives without altering the database schema or dashboard UI.
 - [ ] **Authentication** — integrate `streamlit-authenticator` with LDAP/SSO
 - [ ] **Ticket integration** — auto-create Jira/ServiceNow tickets for new Critical findings
 - [ ] **Real scanner integrations** — Nessus `.nessus` XML, OpenVAS GMP, Qualys CSV

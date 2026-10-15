@@ -24,11 +24,16 @@ from core.database import (
     refresh_overdue_flags,
     update_finding,
     clear_db,
+    get_scan_logs,
+    get_host_last_scanned,
 )
 from core.demo_data import generate_demo_findings
 from core.exports import export_excel, export_markdown_summary
 from core.parsers import parse_nmap_xml, parse_csv
 from core.scoring import cvss_to_severity, compute_risk_score, sla_target_date, is_overdue
+from src.scanners.nmap_scanner import NmapScanner
+from src.scanners.validator import validate_scan_target
+from src.scanners.rescan import reconcile_scan_results
 
 # ============================================================
 # PAGE CONFIG (must be first Streamlit call)
@@ -220,6 +225,11 @@ conn = _get_conn()
 
 def _load_df() -> pd.DataFrame:
     refresh_overdue_flags(conn)
+    scope = st.session_state.get("scope_filter_radio", "All Findings")
+    if scope == "Demo Data Only":
+        return load_findings(conn, source_filter="demo")
+    elif scope == "Live Scans Only":
+        return load_findings(conn, source_filter="nmap-live")
     return load_findings(conn)
 
 
@@ -255,6 +265,7 @@ with st.sidebar:
             "📋 Risk Register",
             "🔧 Remediation Tracker",
             "📐 Compliance View",
+            "🎯 Live Network Scan",
             "📥 Data Ingestion",
             "📤 Export Reports",
         ],
@@ -262,7 +273,16 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.markdown("#### 🗄️ Data Source")
+    st.markdown("#### 🔍 Scope Filter")
+    st.radio(
+        "Scope Filter",
+        ["All Findings", "Demo Data Only", "Live Scans Only"],
+        key="scope_filter_radio",
+        label_visibility="collapsed",
+    )
+
+    st.markdown("---")
+    st.markdown("#### 🗄️ Data Management")
 
     df_check = load_findings(conn)
     if df_check.empty:
@@ -272,7 +292,9 @@ with st.sidebar:
             insert_findings(conn, findings)
             st.rerun()
     else:
-        st.success(f"✅ {len(df_check)} findings loaded")
+        live_count = len(df_check[df_check["source"] == "nmap-live"]) if "source" in df_check.columns else 0
+        demo_count = len(df_check[df_check["source"] != "nmap-live"]) if "source" in df_check.columns else len(df_check)
+        st.caption(f"📊 **{len(df_check)}** total ({demo_count} demo, {live_count} live)")
         if st.button("🔄 Reset to Demo Data", key="sidebar_reset"):
             clear_db(conn)
             findings = generate_demo_findings(150, seed=42)
@@ -871,6 +893,140 @@ elif page == "📐 Compliance View":
         iso_table = iso_counts.copy()
         iso_table["% of Total"] = (iso_table["Findings"] / len(df) * 100).round(1).astype(str) + "%"
         st.dataframe(iso_table, hide_index=True, use_container_width=True)
+
+
+# ============================================================
+# PAGE: LIVE NETWORK SCAN
+# ============================================================
+elif page == "🎯 Live Network Scan":
+    st.markdown('<div class="section-header">Live Network Scanning (Nmap)</div>', unsafe_allow_html=True)
+
+    st.markdown(
+        """
+        <div class="alert-box alert-danger">
+            ⚠️ <b>Authorization & Legal Notice:</b> Only scan systems you own or have explicit written permission to test.
+            Scanning unauthorized targets is strictly prohibited by organizational policy and law (e.g. CFAA 18 U.S.C. § 1030).
+            VulnTrack automatically validates targets and strictly limits scanning to RFC 1918 private subnets
+            (<code>10.0.0.0/8</code>, <code>172.16.0.0/12</code>, <code>192.168.0.0/16</code>) and <code>127.0.0.1</code>.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="alert-box alert-info">
+            💡 <b>Local vs Cloud Execution:</b> Live Nmap scanning operates when VulnTrack runs locally on an analyst workstation
+            or internal security jumpbox with Nmap installed. Streamlit Community Cloud cannot reach local networks and lacks the Nmap binary.
+            For cloud deployments, use <b>Data Ingestion → Nmap XML or Demo Mode</b>.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    scanner = NmapScanner()
+    is_avail, avail_msg = scanner.is_available()
+
+    col_stat, col_info = st.columns([1.6, 1])
+    with col_stat:
+        if is_avail:
+            st.success(f"🟢 **Scanner Engine Ready:** {avail_msg}")
+        else:
+            st.warning(f"🟡 **Scanner Unavailable:** {avail_msg}")
+
+    with col_info:
+        st.markdown(
+            """
+            <div style="font-size:0.82rem; color:#94a3b8; background:rgba(30,41,59,0.5); padding:10px 14px; border-radius:8px;">
+                <b>Supported Engine:</b> Nmap 7.9+ with Vulners NSE<br>
+                <b>Re-scan Diffing:</b> Deduplicates findings by host+port+CVE. Closed ports are auto-mitigated.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("### ⚙️ Scan Configuration")
+    c_target, c_crit, c_owner, c_type = st.columns([1.5, 1, 1, 1])
+
+    with c_target:
+        target_input = st.text_input(
+            "Target IPv4 Address",
+            value="127.0.0.1",
+            help="RFC 1918 private IP address (e.g. 192.168.1.50 or 127.0.0.1). Hostnames and public IPs are rejected.",
+        )
+
+    with c_crit:
+        asset_crit = st.selectbox(
+            "Asset Criticality",
+            ["High", "Medium", "Low"],
+            index=1,
+            help="Used to adjust the 0-100 risk score based on business impact.",
+        )
+
+    with c_owner:
+        owner_val = st.selectbox(
+            "Assigned Team",
+            ["SecOps", "Network-Team", "WinAdmin-Team", "DevOps", "IT-Support", "Unassigned"],
+            index=0,
+        )
+
+    with c_type:
+        asset_type_val = st.selectbox(
+            "Asset Type",
+            ["Host", "Server-Linux", "Server-Windows", "Workstation", "Network"],
+            index=0,
+        )
+
+    launch_scan = st.button("🚀 Launch Live Nmap Scan", type="primary")
+
+    if launch_scan:
+        is_valid, err_msg, ip_obj = validate_scan_target(target_input)
+        if not is_valid:
+            st.error(f"❌ {err_msg}")
+        elif not is_avail:
+            st.error(f"❌ Scanner unavailable: {avail_msg}")
+        else:
+            with st.spinner(f"🔍 Executing live Nmap scan on {target_input} (banner grabbing & Vulners CVE correlation)..."):
+                try:
+                    findings = scanner.scan(
+                        target=str(ip_obj),
+                        asset_criticality=asset_crit,
+                        owner=owner_val,
+                        asset_type=asset_type_val,
+                    )
+                    summary = reconcile_scan_results(
+                        conn,
+                        target=str(ip_obj),
+                        scanned_findings=findings,
+                        scanner_name=scanner.name,
+                        user="Security Analyst",
+                    )
+                    st.success(f"✅ Scan completed successfully for target {target_input}!")
+                    sc1, sc2, sc3, sc4 = st.columns(4)
+                    sc1.markdown(kpi_card(summary["new"], "New Findings", "danger" if summary["new"] > 0 else "default"), unsafe_allow_html=True)
+                    sc2.markdown(kpi_card(summary["unchanged"], "Unchanged Findings", "warning" if summary["unchanged"] > 0 else "default"), unsafe_allow_html=True)
+                    sc3.markdown(kpi_card(summary["mitigated"], "Mitigated (Closed)", "success"), unsafe_allow_html=True)
+                    sc4.markdown(kpi_card(summary["total"], "Active on Host", "default"), unsafe_allow_html=True)
+                except Exception as exc:
+                    st.error(f"❌ Scan execution failed: {exc}")
+
+    st.markdown("---")
+    st.markdown("### 📊 Scan History & Host Coverage")
+    tab_hosts, tab_audit = st.tabs(["🖥️ Scanned Hosts Summary", "📜 Scan Audit Log"])
+
+    with tab_hosts:
+        host_df = get_host_last_scanned(conn)
+        if host_df.empty:
+            st.info("No live network scans have been recorded yet.")
+        else:
+            st.dataframe(host_df, hide_index=True, use_container_width=True)
+
+    with tab_audit:
+        log_df = get_scan_logs(conn)
+        if log_df.empty:
+            st.info("No scan audit logs present in the database.")
+        else:
+            st.dataframe(log_df, hide_index=True, use_container_width=True)
 
 
 # ============================================================
