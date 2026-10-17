@@ -23,3 +23,4 @@ reports/
 *.pdf
 .streamlit/secrets.toml
 host_findings.csv
+host_findings.csv
