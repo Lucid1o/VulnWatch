@@ -1,10 +1,10 @@
 """
 src/scanners/base.py
 ====================
-Extensible scanner interface for VulnTrack.
+Extensible scanner interface for VulnWatch.
 
 Defines the BaseScanner abstract contract and Finding data model so additional
-scanners (e.g. Authenticated SSH Scanner, Container Image Scanner, Cloud Scanner)
+scanners (e.g. Authenticated SSH Scanner, Container Image Scanner, Local Host Collector)
 can be added without altering the database schema or dashboard components.
 """
 
@@ -29,7 +29,7 @@ class Finding:
     port: int | None = None
     asset_type: str = "Host"
     asset_criticality: str = "Medium"
-    owner: str = "Unassigned"
+    owner: str = "me"
     status: str = "Open"
     date_found: str = ""
     target_date: str = ""
@@ -48,8 +48,8 @@ class BaseScanner(ABC):
     """
     Abstract Base Class for all vulnerability and port scanner implementations.
 
-    Any new scanner (e.g., SshAuditScanner, OpenVasScanner) should inherit from
-    BaseScanner and implement `scan` and `is_available`.
+    Any new scanner (e.g., SshScanner, ContainerScanner) should inherit from
+    BaseScanner and implement `name`, `is_available`, and `scan`.
     """
 
     @property
@@ -74,7 +74,7 @@ class BaseScanner(ABC):
         self,
         target: str,
         asset_criticality: str = "Medium",
-        owner: str = "Unassigned",
+        owner: str = "me",
         asset_type: str = "Host",
         timeout_seconds: int = 300,
     ) -> list[Finding]:
@@ -88,7 +88,7 @@ class BaseScanner(ABC):
         asset_criticality:
             Criticality rating ('High', 'Medium', 'Low').
         owner:
-            Assigned remediation team.
+            Assigned owner or team.
         asset_type:
             Asset type classification.
         timeout_seconds:

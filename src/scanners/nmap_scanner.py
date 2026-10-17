@@ -110,8 +110,30 @@ class NmapScanner(BaseScanner):
         return "Nmap Vulners Scanner"
 
     @classmethod
+    def _get_nmap_env(cls) -> dict[str, str]:
+        """Construct process environment with Nmap, Npcap, and C++ runtime DLL directories."""
+        env = os.environ.copy()
+        extra_dirs = [
+            r"C:\Program Files (x86)\Nmap",
+            r"C:\Program Files\Nmap",
+            r"C:\Windows\SysWOW64\Npcap",
+            r"C:\Windows\System32\Npcap",
+            r"C:\Program Files\Microsoft Office\root\vfs\ProgramFilesCommonX86\Microsoft Shared\Office16",
+            r"C:\Program Files\Microsoft Office\root\vfs\ProgramFilesX86\Microsoft Office\Office16",
+        ]
+        valid_dirs = [d for d in extra_dirs if os.path.isdir(d)]
+        if valid_dirs:
+            prefix = os.pathsep.join(valid_dirs)
+            env["PATH"] = f"{prefix}{os.pathsep}{env.get('PATH', '')}"
+            # Also update current process os.environ so child subprocesses inherit it
+            os.environ["PATH"] = env["PATH"]
+        return env
+
+    @classmethod
     def _find_nmap_binary(cls) -> str | None:
         """Locate the Nmap executable via PATH or standard installation directories."""
+        cls._get_nmap_env()
+
         # 1. Standard PATH check
         path = shutil.which("nmap")
         if path:
@@ -131,15 +153,12 @@ class NmapScanner(BaseScanner):
         ]
         for candidate in win_candidates + unix_candidates:
             if os.path.isfile(candidate):
-                candidate_dir = os.path.dirname(candidate)
-                if candidate_dir not in os.environ.get("PATH", ""):
-                    os.environ["PATH"] = f"{candidate_dir}{os.pathsep}{os.environ.get('PATH', '')}"
                 return candidate
 
         return None
 
     def is_available(self) -> tuple[bool, str]:
-        """Verify Nmap binary is present on PATH or standard install paths."""
+        """Verify Nmap binary is present and can execute successfully."""
         nmap_path = self._find_nmap_binary()
         if not nmap_path:
             return (
@@ -150,6 +169,22 @@ class NmapScanner(BaseScanner):
                 " - Ubuntu/Debian: run 'sudo apt install nmap'\n"
                 " - macOS: run 'brew install nmap'",
             )
+
+        # Smoke-test execution with resolved DLL paths
+        try:
+            res = subprocess.run(
+                [nmap_path, "--version"],
+                env=self._get_nmap_env(),
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if res.returncode == 0:
+                first_line = res.stdout.strip().splitlines()[0] if res.stdout else "Nmap ready"
+                return True, f"Nmap ready: {first_line} ({nmap_path})"
+        except Exception:
+            pass
+
         return True, f"Nmap found at: {nmap_path}"
 
     def scan(
@@ -176,51 +211,72 @@ class NmapScanner(BaseScanner):
             available, msg = self.is_available()
             raise RuntimeError(msg)
 
+        nmap_env = self._get_nmap_env()
+
         # Temporary output file
-        temp_fd, temp_path = tempfile.mkstemp(suffix=".xml", prefix="vulntrack_nmap_")
+        temp_fd, temp_path = tempfile.mkstemp(suffix=".xml", prefix="vulnwatch_nmap_")
         os.close(temp_fd)
 
         try:
-            # 1. Primary command: -sV --script vulners
-            cmd = [nmap_bin, "-sV", "--script", "vulners", "-oX", temp_path, target]
+            # 1. Primary command: -Pn -sV --script vulners
+            cmd = [
+                nmap_bin,
+                "-Pn",
+                "-sV",
+                "--top-ports",
+                "100",
+                "--script",
+                "vulners",
+                "--script-timeout",
+                "20s",
+                "-oX",
+                temp_path,
+                target,
+            ]
             logger.info("Running Nmap vulners scan: %s", " ".join(cmd))
 
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=timeout_seconds,
-                check=False,
-            )
-
-            # Check if vulners was missing or failed
-            run_fallback = False
-            if proc.returncode != 0:
-                run_fallback = True
-            elif "Failed to resolve" in proc.stderr or "NSE: script vulners was not found" in proc.stderr:
-                run_fallback = True
-            else:
-                # If XML is empty or invalid, also trigger fallback
-                if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-                    run_fallback = True
-
-            if run_fallback:
-                logger.warning(
-                    "Nmap vulners script unavailable or errored; falling back to plain -sV scan."
-                )
-                cmd_fallback = [nmap_bin, "-sV", "-oX", temp_path, target]
-                proc_fallback = subprocess.run(
-                    cmd_fallback,
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    env=nmap_env,
                     capture_output=True,
                     text=True,
                     timeout=timeout_seconds,
                     check=False,
                 )
-                if proc_fallback.returncode != 0 and (
-                    not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0
-                ):
+            except subprocess.TimeoutExpired:
+                proc = subprocess.CompletedProcess(cmd, returncode=-1, stdout="", stderr=f"Scan timed out after {timeout_seconds}s")
+
+            # Check if XML was generated and is valid
+            xml_valid = False
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                try:
+                    ET.parse(temp_path)
+                    xml_valid = True
+                except ET.ParseError:
+                    xml_valid = False
+
+            if not xml_valid:
+                logger.warning(
+                    "Nmap vulners scan did not produce valid XML; falling back to plain -sV scan."
+                )
+                cmd_fallback = [nmap_bin, "-Pn", "-sV", "--top-ports", "100", "-oX", temp_path, target]
+                try:
+                    proc_fallback = subprocess.run(
+                        cmd_fallback,
+                        env=nmap_env,
+                        capture_output=True,
+                        text=True,
+                        timeout=timeout_seconds,
+                        check=False,
+                    )
+                except subprocess.TimeoutExpired:
+                    proc_fallback = subprocess.CompletedProcess(cmd_fallback, returncode=-1, stdout="", stderr=f"Fallback scan timed out after {timeout_seconds}s")
+
+                if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+                    error_detail = (proc_fallback.stderr or proc_fallback.stdout or proc.stderr or proc.stdout or "").strip()
                     raise RuntimeError(
-                        f"Nmap scan failed: {proc_fallback.stderr or proc_fallback.stdout}"
+                        f"Nmap scan failed: {error_detail or 'Host unreachable or no response. Ensure target IP is up and accessible.'}"
                     )
 
             with open(temp_path, "rb") as f:
@@ -275,17 +331,19 @@ class NmapScanner(BaseScanner):
             if hostnames_el is not None:
                 hn_el = hostnames_el.find("hostname")
                 if hn_el is not None and hn_el.get("name"):
-                    hostname = hn_el.get("name")
+                    hn_name = hn_el.get("name")
+                    hostname = default_target if hn_name == "localhost" else hn_name
 
-            # Determine OS / asset_type heuristic if available
-            os_match = host_el.find(".//osmatch")
+            # Determine OS / asset_type heuristic if caller did not provide a specific one
             detected_asset_type = asset_type
-            if os_match is not None and os_match.get("name"):
-                os_name = os_match.get("name", "").lower()
-                if "windows" in os_name:
-                    detected_asset_type = "Server-Windows"
-                elif "linux" in os_name:
-                    detected_asset_type = "Server-Linux"
+            if detected_asset_type in ("Host", "", None):
+                os_match = host_el.find(".//osmatch")
+                if os_match is not None and os_match.get("name"):
+                    os_name = os_match.get("name", "").lower()
+                    if "windows" in os_name:
+                        detected_asset_type = "Laptop" if "workstation" in os_name or "10" in os_name or "11" in os_name else "Server-Windows"
+                    elif "linux" in os_name:
+                        detected_asset_type = "Home Server" if "server" in os_name else "Server-Linux"
 
             ports_el = host_el.find("ports")
             if ports_el is None:

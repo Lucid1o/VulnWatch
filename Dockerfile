@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 LABEL maintainer="Mihir"
-LABEL description="VulnTrack — Vulnerability & Risk Management Dashboard"
+LABEL description="VulnWatch — Personal Vulnerability Scanner and Tracker"
 
 WORKDIR /app
 

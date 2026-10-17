@@ -73,6 +73,10 @@ def validate_scan_target(target: str) -> tuple[bool, str, ipaddress.IPv4Address 
             None,
         )
 
+    # Normalize 'localhost' alias to 127.0.0.1 loopback
+    if clean_target.lower() == "localhost":
+        clean_target = "127.0.0.1"
+
     # Parse as IPv4 address
     try:
         ip = ipaddress.IPv4Address(clean_target)

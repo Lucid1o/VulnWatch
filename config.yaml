@@ -1,0 +1,7 @@
+# ============================================================
+# VulnWatch Configuration
+# ============================================================
+# Set team_mode to true to unlock enterprise-style team features
+# (owner assignment, SLA deadlines, compliance mapping, executive summary).
+# When false (default), VulnWatch operates in personal home lab mode.
+team_mode: true

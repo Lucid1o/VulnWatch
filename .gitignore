@@ -22,3 +22,4 @@ reports/
 *.xlsx
 *.pdf
 .streamlit/secrets.toml
+host_findings.csv

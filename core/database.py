@@ -1,30 +1,30 @@
 """
 core/database.py
 ================
-SQLite persistence layer for the risk register and scan logs.
+SQLite persistence layer for VulnWatch findings and scan logs.
 
 Schema
 ------
 findings
   id                INTEGER PRIMARY KEY AUTOINCREMENT
-  asset             TEXT NOT NULL          -- hostname / IP
-  asset_type        TEXT                   -- Server-Windows | Server-Linux | Workstation | Network
-  asset_criticality TEXT DEFAULT 'Medium'  -- High | Medium | Low
-  vulnerability     TEXT NOT NULL          -- short description
+  asset             TEXT NOT NULL          -- hostname / IP / device label
+  asset_type        TEXT                   -- Laptop | Raspberry Pi | Home Server | Router | VM
+  asset_criticality TEXT DEFAULT 'Medium'  -- High | Medium | Low (used in Team Mode)
+  vulnerability     TEXT NOT NULL          -- description
   cve               TEXT                   -- CVE-YYYY-NNNNN
   cvss              REAL                   -- 0.0 - 10.0
-  severity          TEXT                   -- Critical | High | Medium | Low
+  severity          TEXT                   -- Critical | High | Medium | Low | Informational
   risk_score        REAL                   -- 0-100 computed
-  service           TEXT                   -- apache/2.4.51, openssh/8.9, ...
+  service           TEXT                   -- e.g. openssh/8.9, nginx/1.24
   port              INTEGER
-  owner             TEXT                   -- responsible team / person
-  status            TEXT DEFAULT 'Open'    -- Open|In Progress|Mitigated|Accepted
+  owner             TEXT DEFAULT 'me'      -- responsible person / team
+  status            TEXT DEFAULT 'Open'    -- Open | Fixed | Ignored (Personal) or Open | In Progress | Mitigated | Accepted (Team)
   date_found        TEXT                   -- ISO date YYYY-MM-DD
-  target_date       TEXT                   -- SLA deadline, ISO date
+  target_date       TEXT                   -- ISO date deadline (Team Mode)
   overdue           INTEGER DEFAULT 0      -- 0/1 boolean
   notes             TEXT DEFAULT ''
-  nist_csf          TEXT                   -- comma-separated functions
-  iso_control       TEXT                   -- e.g. A.8.8
+  nist_csf          TEXT                   -- comma-separated functions (Team Mode)
+  iso_control       TEXT                   -- ISO control reference (Team Mode)
   source            TEXT DEFAULT 'demo'    -- demo | nmap-live | csv | nmap-upload
 
 scan_log
@@ -37,7 +37,7 @@ scan_log
   new_count         INTEGER DEFAULT 0
   mitigated_count   INTEGER DEFAULT 0
   unchanged_count   INTEGER DEFAULT 0
-  user              TEXT DEFAULT 'Security Analyst'
+  user              TEXT DEFAULT 'Local User'
 """
 
 from __future__ import annotations
@@ -76,7 +76,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
             risk_score        REAL,
             service           TEXT,
             port              INTEGER,
-            owner             TEXT,
+            owner             TEXT   DEFAULT 'me',
             status            TEXT    DEFAULT 'Open',
             date_found        TEXT,
             target_date       TEXT,
@@ -89,11 +89,11 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
         """
     )
 
-    # Non-destructive migration: ensure source column exists on older databases
+    # Ensure source column exists on older databases
     try:
         conn.execute("ALTER TABLE findings ADD COLUMN source TEXT DEFAULT 'demo'")
     except sqlite3.OperationalError:
-        pass  # Column already exists
+        pass
 
     # Scan history log table
     conn.execute(
@@ -108,7 +108,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
             new_count        INTEGER DEFAULT 0,
             mitigated_count  INTEGER DEFAULT 0,
             unchanged_count  INTEGER DEFAULT 0,
-            user             TEXT    DEFAULT 'Security Analyst'
+            user             TEXT    DEFAULT 'Local User'
         )
         """
     )
@@ -135,12 +135,13 @@ def insert_findings(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> Non
     col_names = ", ".join(keys)
     sql = f"INSERT INTO findings ({col_names}) VALUES ({placeholders})"
 
-    # Default missing source to 'demo'
     formatted_rows = []
     for row in rows:
         r = [row.get(k) for k in keys]
         if r[-1] is None:
             r[-1] = "demo"
+        if r[10] is None:  # owner
+            r[10] = "me"
         formatted_rows.append(r)
 
     conn.executemany(sql, formatted_rows)
@@ -151,12 +152,12 @@ def load_findings(conn: sqlite3.Connection, source_filter: str | None = None) ->
     """Load findings into a DataFrame, optionally filtered by source."""
     if source_filter:
         df = pd.read_sql_query(
-            "SELECT * FROM findings WHERE source = ? ORDER BY risk_score DESC",
+            "SELECT * FROM findings WHERE source = ? ORDER BY cvss DESC, risk_score DESC",
             conn,
             params=(source_filter,),
         )
     else:
-        df = pd.read_sql_query("SELECT * FROM findings ORDER BY risk_score DESC", conn)
+        df = pd.read_sql_query("SELECT * FROM findings ORDER BY cvss DESC, risk_score DESC", conn)
     return df
 
 
@@ -164,16 +165,16 @@ def update_finding(
     conn: sqlite3.Connection,
     finding_id: int,
     status: str,
-    owner: str,
-    notes: str,
+    owner: str = "me",
+    notes: str = "",
 ) -> None:
     """Update mutable fields on a single finding."""
     from datetime import date
     from core.scoring import is_overdue
 
-    # Retrieve current row to recompute overdue flag
-    row = conn.execute("SELECT severity, date_found FROM findings WHERE id=?", (finding_id,)).fetchone()
+    row = conn.execute("SELECT severity, date_found, owner FROM findings WHERE id=?", (finding_id,)).fetchone()
     overdue = 0
+    final_owner = owner if owner else (row["owner"] if row and row["owner"] else "me")
     if row:
         overdue = int(is_overdue(row["severity"], date.fromisoformat(row["date_found"]), status))
 
@@ -183,13 +184,13 @@ def update_finding(
         SET status=?, owner=?, notes=?, overdue=?
         WHERE id=?
         """,
-        (status, owner, notes, overdue, finding_id),
+        (status, final_owner, notes, overdue, finding_id),
     )
     conn.commit()
 
 
 def refresh_overdue_flags(conn: sqlite3.Connection) -> None:
-    """Recompute overdue for every open finding (call on app startup)."""
+    """Recompute overdue for every open finding."""
     from datetime import date
     from core.scoring import is_overdue
 

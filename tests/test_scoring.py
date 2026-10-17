@@ -85,6 +85,13 @@ class TestComputeRiskScore:
         score = compute_risk_score(7.5, "Unknown")  # type: ignore
         assert score >= 0.0
 
+    def test_personal_mode_no_asset_weighting(self):
+        # In personal mode (team_mode=False), criticality multiplier is omitted
+        # 10.0 * 1.0 (Critical) * 10 = 100.0 regardless of Low asset criticality
+        assert compute_risk_score(10.0, "Low", team_mode=False) == 100.0
+        # 7.5 * 0.75 (High) * 10 = 56.2 regardless of Low asset criticality
+        assert compute_risk_score(7.5, "Low", team_mode=False) == pytest.approx(56.2, abs=0.2)
+
 
 # ---------------------------------------------------------------------------
 # sla_target_date

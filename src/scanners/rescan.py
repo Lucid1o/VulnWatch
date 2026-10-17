@@ -33,7 +33,7 @@ def reconcile_scan_results(
     target: str,
     scanned_findings: list[Finding],
     scanner_name: str = "Nmap Vulners Scanner",
-    user: str = "Security Analyst",
+    user: str = "Local User",
 ) -> dict[str, int]:
     """
     Apply re-scan diffing logic against the SQLite risk register.
@@ -116,8 +116,8 @@ def reconcile_scan_results(
             row = existing_by_key[key]
             # Existing finding: keep owner, status, notes
             unchanged_count += 1
-            # If finding was previously marked Mitigated but reappeared, reopen it
-            if row["status"] == "Mitigated":
+            # If finding was previously marked Mitigated/Fixed but reappeared, reopen it
+            if row["status"] in ("Mitigated", "Fixed"):
                 reopen_note = f"[Reopened {today_str}: re-detected during scan]"
                 curr_notes = f"{row['notes'] or ''} | {reopen_note}".strip(" |")
                 conn.execute(

@@ -1,13 +1,23 @@
 """
 tests/test_demo_data.py
 =======================
-Unit tests for core/demo_data.py findings generator.
+Unit tests for core/demo_data.py personal findings generator.
 """
 
 from __future__ import annotations
 
 import pytest
 from core.demo_data import generate_demo_findings, HOSTS, CVE_POOL
+
+
+def test_hosts_personal_setup():
+    assert len(HOSTS) == 5
+    assets = [h["asset"] for h in HOSTS]
+    assert "thinkpad-laptop" in assets
+    assert "raspberrypi-4b" in assets
+    assert "homelab-server" in assets
+    assert "openwrt-router" in assets
+    assert "dev-ubuntu-vm" in assets
 
 
 def test_generate_demo_findings_count():
@@ -28,7 +38,7 @@ def test_generate_demo_findings_schema():
         assert 0.0 <= f["cvss"] <= 10.0
         assert 0.0 <= f["risk_score"] <= 100.0
         assert f["severity"] in ["Critical", "High", "Medium", "Low", "Informational"]
-        assert f["status"] in ["Open", "In Progress", "Mitigated", "Accepted"]
+        assert f["status"] in ["Open", "Fixed", "Ignored", "In Progress", "Mitigated", "Accepted"]
         assert f["overdue"] in (0, 1)
 
 

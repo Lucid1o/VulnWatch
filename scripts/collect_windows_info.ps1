@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Windows Host Information Collector for VulnTrack Dashboard
+    Windows Host Information Collector for VulnWatch Dashboard
 
 .DESCRIPTION
     Collects local users, open TCP/UDP ports, installed hotfixes,
     running services, and installed software. Outputs a CSV compatible
-    with the VulnTrack CSV import format.
+    with the VulnWatch CSV import format.
 
 .PARAMETER OutputPath
     Path for the output CSV file. Default: .\windows_scan_output.csv
@@ -25,7 +25,7 @@ param(
     [Alias("OutputFile")]
     [string]$OutputPath = ".\windows_scan_output.csv",
     [string]$AssetCriticality = "Medium",
-    [string]$Owner = "WinAdmin-Team"
+    [string]$Owner = "me"
 )
 
 # == Elevation check ==========================================================
@@ -39,7 +39,7 @@ $hostname = $env:COMPUTERNAME
 $findings  = [System.Collections.Generic.List[PSCustomObject]]::new()
 $dateFound = (Get-Date).ToString("yyyy-MM-dd")
 
-Write-Host "[*] VulnTrack Windows Collector - Host: $hostname" -ForegroundColor Cyan
+Write-Host "[*] VulnWatch Windows Collector - Host: $hostname" -ForegroundColor Cyan
 Write-Host "[*] Date: $dateFound"
 Write-Host ""
 
@@ -261,7 +261,7 @@ try {
 Write-Host ""
 Write-Host "[*] Writing $($findings.Count) findings to $OutputPath" -ForegroundColor Cyan
 $findings | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8
-Write-Host "[+] Done! Import $OutputPath into the VulnTrack Dashboard (Data Ingestion -> CSV Import)." -ForegroundColor Green
+Write-Host "[+] Done! Import $OutputPath into the VulnWatch Dashboard." -ForegroundColor Green
 Write-Host ""
 Write-Host "Summary:"
 $findings | Group-Object cvss | Sort-Object Name -Descending | ForEach-Object {
